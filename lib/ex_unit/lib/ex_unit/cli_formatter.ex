@@ -9,6 +9,7 @@ defmodule ExUnit.CLIFormatter do
 
   def init(opts) do
     print_filters(Keyword.take(opts, [:include, :exclude]))
+    line_limit = Keyword.get(opts, :line_limit, 100)
 
     config = %{
       seed: opts[:seed],
@@ -21,7 +22,9 @@ defmodule ExUnit.CLIFormatter do
       failure_counter: 0,
       skipped_counter: 0,
       excluded_counter: 0,
-      invalid_counter: 0
+      invalid_counter: 0,
+      consecutive_non_failures: 0,
+      line_limit: line_limit
     }
 
     {:ok, config}
@@ -46,11 +49,19 @@ defmodule ExUnit.CLIFormatter do
       IO.puts(success(trace_test_result(test), config))
     else
       IO.write(success(".", config))
+      maybe_add_new_line(config)
     end
 
+    consecutive_non_failures = update_non_failures(config)
     test_counter = update_test_counter(config.test_counter, test)
     test_timings = update_test_timings(config.test_timings, test)
-    config = %{config | test_counter: test_counter, test_timings: test_timings}
+
+    config = %{
+      config
+      | test_counter: test_counter,
+        test_timings: test_timings,
+        consecutive_non_failures: consecutive_non_failures
+    }
 
     {:noreply, config}
   end
@@ -69,10 +80,18 @@ defmodule ExUnit.CLIFormatter do
       IO.puts(skipped(trace_test_skipped(test), config))
     else
       IO.write(skipped("*", config))
+      maybe_add_new_line(config)
     end
 
+    consecutive_non_failures = update_non_failures(config)
     test_counter = update_test_counter(config.test_counter, test)
-    config = %{config | test_counter: test_counter, skipped_counter: config.skipped_counter + 1}
+
+    config = %{
+      config
+      | test_counter: test_counter,
+        skipped_counter: config.skipped_counter + 1,
+        consecutive_non_failures: consecutive_non_failures
+    }
 
     {:noreply, config}
   end
@@ -82,10 +101,18 @@ defmodule ExUnit.CLIFormatter do
       IO.puts(invalid(trace_test_result(test), config))
     else
       IO.write(invalid("?", config))
+      maybe_add_new_line(config)
     end
 
+    consecutive_non_failures = update_non_failures(config)
     test_counter = update_test_counter(config.test_counter, test)
-    config = %{config | test_counter: test_counter, invalid_counter: config.invalid_counter + 1}
+
+    config = %{
+      config
+      | test_counter: test_counter,
+        invalid_counter: config.invalid_counter + 1,
+        consecutive_non_failures: consecutive_non_failures
+    }
 
     {:noreply, config}
   end
@@ -196,6 +223,22 @@ defmodule ExUnit.CLIFormatter do
       us = div(us, 10)
       "#{div(us, 10)}.#{rem(us, 10)}"
     end
+  end
+
+  defp maybe_add_new_line(%{consecutive_non_failures: limit, line_limit: limit}) do
+    IO.write("\n")
+  end
+
+  defp maybe_add_new_line(_) do
+    :ok
+  end
+
+  defp update_non_failures(%{consecutive_non_failures: limit, line_limit: limit}) do
+    0
+  end
+
+  defp update_non_failures(%{consecutive_non_failures: consecutive, line_limit: _}) do
+    consecutive + 1
   end
 
   defp update_test_counter(test_counter, %{tags: %{test_type: test_type}}) do
